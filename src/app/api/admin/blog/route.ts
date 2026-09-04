@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, extractToken } from '@/lib/jwt';
-import { getBlogPosts, slugify, writeMarkdownDocument } from '@/lib/content';
+import { getBlogPosts, slugify } from '@/lib/content';
+import { saveContentDocument } from '@/lib/github-content';
 import { z } from 'zod';
 
 const BlogPostSchema = z.object({
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
       content,
     };
 
-    const saved = await writeMarkdownDocument('blogs', postRecord, content);
+    const saved = await saveContentDocument('blogs', postRecord, content);
 
     return NextResponse.json(
       {
@@ -71,6 +72,14 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+
+    if (error instanceof Error && error.message === 'GitHub content storage is not configured') {
+      return NextResponse.json({ error: 'GitHub content storage is not configured' }, { status: 503 });
+    }
+
+    if (error instanceof Error && 'status' in error && (error as Error & { status?: number }).status === 422) {
+      return NextResponse.json({ error: 'A blog post with this title already exists' }, { status: 409 });
     }
 
     console.error('Error creating blog post:', error);

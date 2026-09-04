@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, extractToken } from '@/lib/jwt';
-import { deleteMarkdownDocument, getBlogPosts, slugify, writeMarkdownDocument } from '@/lib/content';
+import { slugify } from '@/lib/content';
+import { deleteContentDocument, saveContentDocument } from '@/lib/github-content';
 import { z } from 'zod';
 
 const BlogPostSchema = z.object({
@@ -28,19 +29,9 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const existingPosts = await getBlogPosts();
-    const post = existingPosts.find((item) => item.slug === params.id);
-    if (!post) {
-      return NextResponse.json({ error: 'Blog post not found' }, { status: 404 });
-    }
-
     const body = await request.json();
     const { title, content, category, tags, description } = BlogPostSchema.parse(body);
     const newSlug = slugify(title);
-    const duplicate = existingPosts.find((item) => item.slug !== params.id && item.slug === newSlug);
-    if (duplicate) {
-      return NextResponse.json({ error: 'A blog post with this title already exists' }, { status: 400 });
-    }
 
     const nextPost = {
       slug: newSlug,
@@ -49,19 +40,27 @@ export async function PUT(
       category: category || 'General',
       tags: tags || [],
       published: true,
-      date: post.date || new Date().toISOString(),
+      date: new Date().toISOString(),
       content,
     };
 
-    if (newSlug !== params.id) {
-      await deleteMarkdownDocument('blogs', params.id);
-    }
-
-    const saved = await writeMarkdownDocument('blogs', nextPost, content, newSlug);
+    const saved = await saveContentDocument('blogs', nextPost, content, params.id);
     return NextResponse.json({ id: saved.slug, ...nextPost }, { status: 200 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+
+    if (error instanceof Error && error.message === 'GitHub content storage is not configured') {
+      return NextResponse.json({ error: 'GitHub content storage is not configured' }, { status: 503 });
+    }
+
+    if (error instanceof Error && 'status' in error && (error as Error & { status?: number }).status === 404) {
+      return NextResponse.json({ error: 'Blog post file not found in GitHub' }, { status: 404 });
+    }
+
+    if (error instanceof Error && 'status' in error && (error as Error & { status?: number }).status === 422) {
+      return NextResponse.json({ error: 'A blog post with this title already exists' }, { status: 409 });
     }
 
     console.error('Error updating blog post:', error);
@@ -78,15 +77,17 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const existingPosts = await getBlogPosts();
-    const post = existingPosts.find((item) => item.slug === params.id);
-    if (!post) {
-      return NextResponse.json({ error: 'Blog post not found' }, { status: 404 });
-    }
-
-    await deleteMarkdownDocument('blogs', params.id);
+    await deleteContentDocument('blogs', params.id);
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
+    if (error instanceof Error && error.message === 'GitHub content storage is not configured') {
+      return NextResponse.json({ error: 'GitHub content storage is not configured' }, { status: 503 });
+    }
+
+    if (error instanceof Error && 'status' in error && (error as Error & { status?: number }).status === 404) {
+      return NextResponse.json({ error: 'Blog post file not found in GitHub' }, { status: 404 });
+    }
+
     console.error('Error deleting blog post:', error);
     return NextResponse.json({ error: 'Failed to delete blog post' }, { status: 500 });
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, extractToken } from '@/lib/jwt';
-import { deleteMarkdownDocument, getProjects, slugify, writeMarkdownDocument } from '@/lib/content';
+import { slugify } from '@/lib/content';
+import { deleteContentDocument, saveContentDocument } from '@/lib/github-content';
 import { z } from 'zod';
 
 const ProjectSchema = z.object({
@@ -29,19 +30,9 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const existingProjects = await getProjects();
-    const project = existingProjects.find((item) => item.slug === params.id);
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
-    }
-
     const body = await request.json();
-    const { title, description, image, technologies, githubUrl, content = project.content } = ProjectSchema.parse(body);
+    const { title, description, image, technologies, githubUrl, content = '' } = ProjectSchema.parse(body);
     const newSlug = slugify(title);
-    const duplicate = existingProjects.find((item) => item.slug !== params.id && item.slug === newSlug);
-    if (duplicate) {
-      return NextResponse.json({ error: 'A project with this title already exists' }, { status: 400 });
-    }
 
     const nextProject = {
       slug: newSlug,
@@ -51,20 +42,28 @@ export async function PUT(
       technologies: technologies || [],
       githubUrl: githubUrl || undefined,
       published: true,
-      date: project.date || new Date().toISOString(),
+      date: new Date().toISOString(),
       content,
     };
 
-    if (newSlug !== params.id) {
-      await deleteMarkdownDocument('projects', params.id);
-    }
-
-    const saved = await writeMarkdownDocument('projects', nextProject, content, newSlug);
+    const saved = await saveContentDocument('projects', nextProject, content, params.id);
 
     return NextResponse.json({ id: saved.slug, ...nextProject }, { status: 200 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors }, { status: 400 });
+    }
+
+    if (error instanceof Error && error.message === 'GitHub content storage is not configured') {
+      return NextResponse.json({ error: 'GitHub content storage is not configured' }, { status: 503 });
+    }
+
+    if (error instanceof Error && 'status' in error && (error as Error & { status?: number }).status === 404) {
+      return NextResponse.json({ error: 'Project file not found in GitHub' }, { status: 404 });
+    }
+
+    if (error instanceof Error && 'status' in error && (error as Error & { status?: number }).status === 422) {
+      return NextResponse.json({ error: 'A project with this title already exists' }, { status: 409 });
     }
 
     console.error('Error updating project:', error);
@@ -81,15 +80,17 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const existingProjects = await getProjects();
-    const project = existingProjects.find((item) => item.slug === params.id);
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
-    }
-
-    await deleteMarkdownDocument('projects', params.id);
+    await deleteContentDocument('projects', params.id);
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
+    if (error instanceof Error && error.message === 'GitHub content storage is not configured') {
+      return NextResponse.json({ error: 'GitHub content storage is not configured' }, { status: 503 });
+    }
+
+    if (error instanceof Error && 'status' in error && (error as Error & { status?: number }).status === 404) {
+      return NextResponse.json({ error: 'Project file not found in GitHub' }, { status: 404 });
+    }
+
     console.error('Error deleting project:', error);
     return NextResponse.json({ error: 'Failed to delete project' }, { status: 500 });
   }

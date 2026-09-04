@@ -168,34 +168,17 @@ async function readDocument(filePath: string): Promise<Record<string, any>> {
   };
 }
 
-export async function writeMarkdownDocument(
-  collection: 'projects' | 'blogs',
-  document: Record<string, any>,
-  content: string,
-  existingSlug?: string
-): Promise<{ slug: string; filePath: string }> {
-  const dirPath = path.join(process.cwd(), 'content', collection);
-  await fs.mkdir(dirPath, { recursive: true });
-
+export function renderMarkdownDocument(document: Record<string, any>, content: string): string {
   const slug = String(document.slug || slugify(String(document.title || 'untitled')));
-  const targetSlug = existingSlug || slug;
-  const fileName = `${targetSlug}.mdx`;
-  const filePath = path.join(dirPath, fileName);
   const { content: body, ...meta } = document;
 
   const data = {
     ...meta,
-    slug: targetSlug,
+    slug,
     published: meta.published ?? true,
   };
 
-  await fs.writeFile(filePath, `${serializeFrontmatter(data)}${content.trim()}\n`, 'utf-8');
-  return { slug: targetSlug, filePath };
-}
-
-export async function deleteMarkdownDocument(collection: 'projects' | 'blogs', slug: string): Promise<void> {
-  const filePath = path.join(process.cwd(), 'content', collection, `${slug}.mdx`);
-  await fs.rm(filePath, { force: true });
+  return `${serializeFrontmatter(data)}${body?.trim() || content.trim()}\n`;
 }
 
 export async function getAdminUser(): Promise<AdminUser | null> {
