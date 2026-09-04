@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-primary: #7c3aed;
+  --color-primary-light: #a78bfa;
+  --color-surface: #ffffff;
+  --color-surface-dark: #1a1a24;
+  --color-background: #fafafa;
+  --color-background-dark: #0f0f14;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-gray-900 antialiased;
+    font-family: var(--font-sans);
+  }
+
+  .dark body {
+    @apply bg-background-dark text-gray-100;
+  }
+}
