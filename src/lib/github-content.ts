@@ -6,6 +6,11 @@ type GitHubFile = {
   sha: string;
 };
 
+type GitHubContentEntry = {
+  type: 'file' | 'dir';
+  path: string;
+};
+
 type GitHubError = Error & {
   status?: number;
 };
@@ -130,5 +135,35 @@ export async function deleteContentDocument(collection: Collection, slug: string
         branch,
       }),
     }
+  );
+}
+
+export async function getContentFiles(collection: Collection): Promise<Array<{ path: string; content: string }>> {
+  const { owner, repository, branch } = getGitHubConfig();
+  const entries = await githubRequest<GitHubContentEntry[]>(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/contents/content/${collection}?ref=${encodeURIComponent(branch)}`,
+    { method: 'GET' }
+  );
+
+  const files = entries.filter(
+    (entry) => entry.type === 'file' && (entry.path.endsWith('.md') || entry.path.endsWith('.mdx'))
+  );
+
+  return Promise.all(
+    files.map(async (entry) => {
+      const file = await githubRequest<{ content?: string }>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/contents/${encodePath(entry.path)}?ref=${encodeURIComponent(branch)}`,
+        { method: 'GET' }
+      );
+
+      if (!file.content) {
+        throw new Error(`GitHub content file is empty: ${entry.path}`);
+      }
+
+      return {
+        path: entry.path,
+        content: Buffer.from(file.content.replace(/\s/g, ''), 'base64').toString('utf8'),
+      };
+    })
   );
 }

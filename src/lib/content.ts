@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { getContentFiles } from '@/lib/github-content';
 
 export interface AdminUser {
   email: string;
@@ -205,12 +206,30 @@ export async function getAdminUser(): Promise<AdminUser | null> {
 
 export async function getProjects(): Promise<ProjectContent[]> {
   const dirPath = path.join(process.cwd(), 'content', 'projects');
-  const files = await readMarkdownFiles(dirPath);
+  let documents: Array<{ sourcePath: string; document: Record<string, any> }>;
 
-  const projects = await Promise.all(
-    files.map(async (filePath) => {
-      const doc = await readDocument(filePath);
-      const slug = String(doc.slug || path.basename(filePath, path.extname(filePath)));
+  try {
+    const githubFiles = await getContentFiles('projects');
+    documents = githubFiles.map((file) => {
+      const { data, content } = parseFrontmatter(file.content);
+      return { sourcePath: file.path, document: { ...data, content } };
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message !== 'GitHub content storage is not configured') {
+      throw error;
+    }
+
+    const files = await readMarkdownFiles(dirPath);
+    documents = await Promise.all(
+      files.map(async (filePath) => ({
+        sourcePath: filePath,
+        document: await readDocument(filePath),
+      }))
+    );
+  }
+
+  const projects = documents.map(({ sourcePath, document: doc }) => {
+      const slug = String(doc.slug || path.basename(sourcePath, path.extname(sourcePath)));
       return {
         id: slug,
         slug,
@@ -225,8 +244,7 @@ export async function getProjects(): Promise<ProjectContent[]> {
         published: doc.published !== false,
         content: String(doc.content || ''),
       } as ProjectContent;
-    })
-  );
+    });
 
   return projects.filter((project) => project.published !== false).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
